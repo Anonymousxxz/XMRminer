@@ -1,6 +1,6 @@
 #!/bin/bash
 # install.sh — Instalador Linux/Android para MinerXMR
-# La config se pasa como variable de entorno XMR_CONFIG
+# La config ya fue escrita en ~/.xmr_miner/miner_config.dat por el comando del bot
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -13,12 +13,6 @@ echo -e "${CYAN}  Minero XMR  |  Instalando...${NC}"
 echo -e "${CYAN}=======================================================${NC}"
 echo ""
 
-# ── Verificar config ──────────────────────────────────────
-if [ -z "$XMR_CONFIG" ]; then
-    echo "  Error: XMR_CONFIG no definida."
-    exit 1
-fi
-
 # ── Detectar entorno ──────────────────────────────────────
 IS_TERMUX=false
 if [ -n "$PREFIX" ] && echo "$PREFIX" | grep -q "com.termux"; then
@@ -29,28 +23,21 @@ fi
 INSTALL_DIR="$HOME/.xmr_miner"
 mkdir -p "$INSTALL_DIR"
 
-# ── Verificar/instalar dependencias ───────────────────────
-echo -e "${YELLOW}  Verificando dependencias...${NC}"
+# ── Verificar que la config existe ────────────────────────
+if [ ! -s "$INSTALL_DIR/miner_config.dat" ]; then
+    echo "  Error: miner_config.dat no encontrado o vacio."
+    exit 1
+fi
 
+echo -e "${GREEN}  Config encontrada.${NC}"
+
+# ── Dependencias ──────────────────────────────────────────
+echo -e "${YELLOW}  Verificando dependencias...${NC}"
 if $IS_TERMUX; then
-    if ! command -v python &>/dev/null; then
-        echo -e "${YELLOW}  Instalando Python...${NC}"
-        pkg install -y python curl
-    fi
-    if ! command -v curl &>/dev/null; then
-        pkg install -y curl
-    fi
+    command -v python &>/dev/null || pkg install -y python
+    command -v curl   &>/dev/null || pkg install -y curl
 else
-    if ! command -v python3 &>/dev/null; then
-        echo -e "${YELLOW}  Instalando Python3...${NC}"
-        if command -v apt-get &>/dev/null; then
-            sudo apt-get install -y python3 curl -qq
-        elif command -v yum &>/dev/null; then
-            sudo yum install -y python3 curl -q
-        elif command -v dnf &>/dev/null; then
-            sudo dnf install -y python3 curl -q
-        fi
-    fi
+    command -v python3 &>/dev/null || sudo apt-get install -y python3 curl -qq
 fi
 
 # ── Descargar miner.py ────────────────────────────────────
@@ -60,15 +47,6 @@ curl -sSL "$MINER_URL" -o "$INSTALL_DIR/miner.py"
 
 if [ ! -f "$INSTALL_DIR/miner.py" ]; then
     echo "  Error descargando miner.py"
-    exit 1
-fi
-
-# ── Guardar config encriptada (sin sed, directo desde variable) ───
-printf '%s' "$XMR_CONFIG" > "$INSTALL_DIR/miner_config.dat"
-
-# Verificar que se guardo
-if [ ! -s "$INSTALL_DIR/miner_config.dat" ]; then
-    echo "  Error guardando configuracion."
     exit 1
 fi
 

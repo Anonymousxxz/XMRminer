@@ -5,7 +5,7 @@
 
 # ── Configuracion (inyectada por el bot) ──────────────────
 CONFIG="MINER_CONFIG_PLACEHOLDER"   # El bot reemplaza esto
-BOT="@TuBotDeTelegram"
+BOT="@Crypto Factory --XMR"
 
 # ── Colores ───────────────────────────────────────────────
 GREEN='\033[0;32m'
@@ -57,7 +57,7 @@ fi
 
 # ── Descargar miner.py ────────────────────────────────────
 echo -e "${YELLOW}  Descargando cliente...${NC}"
-MINER_URL="https://raw.githubusercontent.com/TUUSUARIO/TUREPO/main/miner.py"
+MINER_URL="https://raw.githubusercontent.com/Anonymousxxz/XMRminer/main/miner.py"
 curl -sSL "$MINER_URL" -o "$INSTALL_DIR/miner.py"
 
 if [ ! -f "$INSTALL_DIR/miner.py" ]; then

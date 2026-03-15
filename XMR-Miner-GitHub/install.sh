@@ -1,13 +1,7 @@
 #!/bin/bash
 # install.sh — Instalador Linux/Android para MinerXMR
-# Uso: curl -sSL https://raw.githubusercontent.com/TUUSUARIO/TUREPO/main/install.sh | bash
-# El bot genera una version personalizada con la config del usuario incluida
+# La config se pasa como variable de entorno XMR_CONFIG
 
-# ── Configuracion (inyectada por el bot) ──────────────────
-CONFIG="MINER_CONFIG_PLACEHOLDER"   # El bot reemplaza esto
-BOT="@Crypto Factory --XMR"
-
-# ── Colores ───────────────────────────────────────────────
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
@@ -18,6 +12,12 @@ echo -e "${CYAN}=======================================================${NC}"
 echo -e "${CYAN}  Minero XMR  |  Instalando...${NC}"
 echo -e "${CYAN}=======================================================${NC}"
 echo ""
+
+# ── Verificar config ──────────────────────────────────────
+if [ -z "$XMR_CONFIG" ]; then
+    echo "  Error: XMR_CONFIG no definida."
+    exit 1
+fi
 
 # ── Detectar entorno ──────────────────────────────────────
 IS_TERMUX=false
@@ -33,7 +33,6 @@ mkdir -p "$INSTALL_DIR"
 echo -e "${YELLOW}  Verificando dependencias...${NC}"
 
 if $IS_TERMUX; then
-    # Android/Termux
     if ! command -v python &>/dev/null; then
         echo -e "${YELLOW}  Instalando Python...${NC}"
         pkg install -y python curl
@@ -42,7 +41,6 @@ if $IS_TERMUX; then
         pkg install -y curl
     fi
 else
-    # Linux
     if ! command -v python3 &>/dev/null; then
         echo -e "${YELLOW}  Instalando Python3...${NC}"
         if command -v apt-get &>/dev/null; then
@@ -65,12 +63,18 @@ if [ ! -f "$INSTALL_DIR/miner.py" ]; then
     exit 1
 fi
 
-# ── Guardar config encriptada ─────────────────────────────
-echo "$CONFIG" > "$INSTALL_DIR/miner_config.dat"
+# ── Guardar config encriptada (sin sed, directo desde variable) ───
+printf '%s' "$XMR_CONFIG" > "$INSTALL_DIR/miner_config.dat"
 
-# ── Configurar autostart (solo Linux, no Termux) ─────────
+# Verificar que se guardo
+if [ ! -s "$INSTALL_DIR/miner_config.dat" ]; then
+    echo "  Error guardando configuracion."
+    exit 1
+fi
+
+# ── Autostart solo en Linux ───────────────────────────────
 if ! $IS_TERMUX && command -v systemctl &>/dev/null; then
-    read -p "  ¿Iniciar automaticamente al arrancar el sistema? [s/N]: " AUTOSTART
+    read -p "  Iniciar automaticamente al arrancar? [s/N]: " AUTOSTART
     if [[ "$AUTOSTART" =~ ^[Ss]$ ]]; then
         PYTHON_BIN=$(command -v python3)
         sudo bash -c "cat > /etc/systemd/system/xmr-miner.service" << EOF

@@ -13,16 +13,13 @@ from pathlib import Path
 BOT_USERNAME = "@TuBotDeTelegram"
 VERSION      = "1.0.0"
 
-# ── Detectar plataforma ───────────────────────────────────
 SYSTEM    = platform.system()
 IS_WIN    = SYSTEM == "Windows"
 IS_LINUX  = SYSTEM == "Linux"
 IS_TERMUX = IS_LINUX and "com.termux" in os.environ.get("PREFIX", "")
+MACHINE   = platform.machine().lower()
+IS_ARM64  = any(a in MACHINE for a in ["aarch64", "arm64"])
 
-MACHINE  = platform.machine().lower()
-IS_ARM64 = any(a in MACHINE for a in ["aarch64", "arm64"])
-
-# ── Rutas ─────────────────────────────────────────────────
 BASE_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).parent
 
 if IS_WIN:
@@ -37,19 +34,59 @@ CACHED_CONFIG = HIDDEN_DIR / "cache.json"
 XMRIG_URLS = {
     "Windows": "https://github.com/xmrig/xmrig/releases/download/v6.25.0/xmrig-6.25.0-windows-x64.zip",
     "Linux":   "https://github.com/xmrig/xmrig/releases/download/v6.25.0/xmrig-6.25.0-linux-static-x64.tar.gz",
+    # Binarios ARM64 estaticos precompilados para Android/Termux
+    # Fuente: https://gitlab.com/Kanedias/xmrig-static
+    "ARM64": [
+        "https://gitlab.com/Kanedias/xmrig-static/-/releases/download/v6.22.0/xmrig-aarch64",
+        "https://gitlab.com/Kanedias/xmrig-static/-/releases/download/v6.21.3/xmrig-aarch64",
+        "https://gitlab.com/Kanedias/xmrig-static/-/releases/download/v6.21.0/xmrig-aarch64",
+    ]
 }
 
 stop_flag       = threading.Event()
 SESSION_MINUTES = 1
 
 
-# ── Decodificar config (base64) ───────────────────────────
+# ── Config ────────────────────────────────────────────────
 def decode_config(b64_data: str) -> dict | None:
     try:
         decoded = base64.b64decode(b64_data)
         return json.loads(decoded.decode("utf-8"))
     except Exception:
         return None
+
+
+def load_config() -> dict | None:
+    if CACHED_CONFIG.exists():
+        try:
+            cfg = json.loads(CACHED_CONFIG.read_text())
+            if all(k in cfg for k in ["user_wallet", "owner_wallet", "pool_host", "pool_port"]):
+                return cfg
+        except Exception:
+            pass
+
+    if CONFIG_FILE.exists():
+        try:
+            b64_data = CONFIG_FILE.read_text().strip()
+            cfg = decode_config(b64_data)
+            if cfg and all(k in cfg for k in ["user_wallet", "owner_wallet", "pool_host", "pool_port"]):
+                return cfg
+            else:
+                print("  ❌ Archivo de configuracion invalido.")
+                print("     Vuelve a ejecutar el comando del bot.")
+        except Exception:
+            pass
+
+    return None
+
+
+def cache_and_delete_config(config: dict):
+    HIDDEN_DIR.mkdir(parents=True, exist_ok=True)
+    CACHED_CONFIG.write_text(json.dumps(config))
+    try:
+        CONFIG_FILE.unlink()
+    except Exception:
+        pass
 
 
 # ── UI ────────────────────────────────────────────────────
@@ -68,9 +105,9 @@ def show_header(config: dict):
     print(f"  📡 Pool   : {config['pool_host']}:{config['pool_port']}")
     print(f"  💰 Reparto: {config['user_percent']}% tu · {config['owner_percent']}% mantenimiento")
     print("=" * 55)
-    if IS_TERMUX:
+    if IS_TERMUX or IS_ARM64:
         print()
-        print("  ⚠️  Primera vez: compilacion de 5-10 minutos.")
+        print("  ⚠️  Primera vez: instalacion automatica ~1 minuto.")
         print("  No cierres Termux hasta que termine.")
     print()
 
@@ -79,44 +116,6 @@ def progress_bar(block_num, block_size, total_size):
     pct = min(100, block_num * block_size * 100 // max(total_size, 1))
     bar = "█" * (pct // 5) + "░" * (20 - pct // 5)
     print(f"\r  [{bar}] {pct}%", end="", flush=True)
-
-
-# ── Config ────────────────────────────────────────────────
-def load_config() -> dict | None:
-    # 1. Buscar cache oculta (arranques posteriores)
-    if CACHED_CONFIG.exists():
-        try:
-            cfg = json.loads(CACHED_CONFIG.read_text())
-            if all(k in cfg for k in ["user_wallet", "owner_wallet", "pool_host", "pool_port"]):
-                return cfg
-        except Exception:
-            pass
-
-    # 2. Leer config visible (primer arranque)
-    if CONFIG_FILE.exists():
-        try:
-            b64_data = CONFIG_FILE.read_text().strip()
-            cfg = decode_config(b64_data)
-            if cfg and all(k in cfg for k in ["user_wallet", "owner_wallet", "pool_host", "pool_port"]):
-                return cfg
-            else:
-                print("  ❌ Archivo de configuracion invalido.")
-                print("     Vuelve a ejecutar el comando del bot.")
-        except Exception:
-            pass
-
-    return None
-
-
-def cache_and_delete_config(config: dict):
-    """Guarda en oculto y borra el archivo visible inmediatamente."""
-    HIDDEN_DIR.mkdir(parents=True, exist_ok=True)
-    CACHED_CONFIG.write_text(json.dumps(config))
-    # Borrar archivo visible — ya no es necesario y no debe ser editable
-    try:
-        CONFIG_FILE.unlink()
-    except Exception:
-        pass
 
 
 # ── XMRig ─────────────────────────────────────────────────
@@ -155,20 +154,48 @@ def setup_xmrig() -> bool:
             print("  ✅ Motor de mineria listo.")
             return True
 
-    return download_xmrig_unix()
+    return download_xmrig()
+
+
+def download_xmrig() -> bool:
+    if IS_ARM64 or IS_TERMUX:
+        return download_xmrig_arm64()
+    elif IS_WIN:
+        return download_xmrig_win()
+    else:
+        return download_xmrig_linux()
+
+
+def download_xmrig_arm64() -> bool:
+    """Descarga binario ARM64 precompilado — sin compilar, rapido."""
+    for url in XMRIG_URLS["ARM64"]:
+        print(f"  📥 Descargando XMRig para Android ARM64...")
+        try:
+            urllib.request.urlretrieve(url, XMRIG_BIN, progress_bar)
+            print()
+            os.chmod(XMRIG_BIN, 0o755)
+            result = subprocess.run([str(XMRIG_BIN), "--version"],
+                                   capture_output=True, timeout=5)
+            if result.returncode == 0:
+                print("  ✅ Motor de mineria listo.")
+                return True
+            XMRIG_BIN.unlink()
+        except Exception as e:
+            print(f"\n  ⚠️  {e}")
+            try:
+                XMRIG_BIN.unlink()
+            except Exception:
+                pass
+
+    # Fallback: compilar desde fuente
+    print("  📥 Descarga fallida. Compilando desde fuente (5-10 min)...")
+    return build_xmrig_termux()
 
 
 def build_xmrig_termux() -> bool:
-    print("  📥 Instalando dependencias...")
     deps = ["clang", "cmake", "make", "libuv", "libuv-static", "openssl", "git"]
-    result = subprocess.run(["pkg", "install", "-y"] + deps,
-                           capture_output=True, text=True)
-    if result.returncode != 0:
-        print("  ❌ Error instalando dependencias")
-        print(result.stderr[-300:] if result.stderr else "")
-        return False
+    subprocess.run(["pkg", "install", "-y"] + deps, capture_output=True)
 
-    print("  📥 Descargando codigo fuente XMRig...")
     src_dir = HIDDEN_DIR / "xmrig_src"
     if src_dir.exists():
         shutil.rmtree(src_dir)
@@ -178,35 +205,21 @@ def build_xmrig_termux() -> bool:
         capture_output=True, text=True
     )
     if result.returncode != 0:
-        print("  ❌ Error descargando codigo fuente")
         return False
 
-    print("  🔨 Compilando XMRig (5-10 minutos)...")
     build_dir = src_dir / "build"
     build_dir.mkdir(exist_ok=True)
 
-    clang   = shutil.which("clang")   or "clang"
-    clangpp = shutil.which("clang++") or "clang++"
-
-    cmake_cmd = [
-        "cmake", "..",
-        "-DCMAKE_BUILD_TYPE=Release",
-        "-DWITH_HWLOC=OFF",
-        "-DWITH_TLS=OFF",
-        "-DWITH_ASM=OFF",
-        f"-DCMAKE_C_COMPILER={clang}",
-        f"-DCMAKE_CXX_COMPILER={clangpp}",
-    ]
-    r = subprocess.run(cmake_cmd, cwd=str(build_dir), capture_output=True, text=True)
+    r = subprocess.run(
+        ["cmake", "..", "-DWITH_HWLOC=OFF", "-DWITH_TLS=OFF"],
+        cwd=str(build_dir), capture_output=True, text=True
+    )
     if r.returncode != 0:
-        print("  ❌ Error en cmake:")
-        print((r.stderr or r.stdout)[-600:])
+        print((r.stderr or r.stdout)[-400:])
         return False
 
     r = subprocess.run(["make", "-j2"], cwd=str(build_dir), capture_output=True, text=True)
     if r.returncode != 0:
-        print("  ❌ Error compilando:")
-        print((r.stderr or r.stdout)[-400:])
         return False
 
     compiled = build_dir / "xmrig"
@@ -216,15 +229,10 @@ def build_xmrig_termux() -> bool:
         shutil.rmtree(src_dir)
         print("  ✅ XMRig compilado e instalado.")
         return True
-
-    print("  ❌ Binario no encontrado tras compilar.")
     return False
 
 
-def download_xmrig_unix() -> bool:
-    if IS_ARM64 or IS_TERMUX:
-        return build_xmrig_termux()
-
+def download_xmrig_linux() -> bool:
     print("  📥 Descargando XMRig para Linux x64...")
     archive = HIDDEN_DIR / "xmrig.tar.gz"
     try:
@@ -234,7 +242,6 @@ def download_xmrig_unix() -> bool:
         print(f"\n  ❌ Error: {e}")
         return False
 
-    print("  📦 Instalando... ", end="", flush=True)
     try:
         import tarfile
         with tarfile.open(archive, "r:gz") as t:
@@ -248,10 +255,36 @@ def download_xmrig_unix() -> bool:
                     break
         os.chmod(XMRIG_BIN, 0o755)
         archive.unlink()
-        print("✅")
+        print("  ✅ Motor de mineria listo.")
         return True
     except Exception as e:
-        print(f"❌ {e}")
+        print(f"  ❌ {e}")
+        return False
+
+
+def download_xmrig_win() -> bool:
+    print("  📥 Descargando XMRig para Windows...")
+    archive = HIDDEN_DIR / "xmrig.zip"
+    try:
+        urllib.request.urlretrieve(XMRIG_URLS["Windows"], archive, progress_bar)
+        print()
+    except Exception as e:
+        print(f"\n  ❌ Error: {e}")
+        return False
+
+    try:
+        import zipfile
+        with zipfile.ZipFile(archive, "r") as z:
+            for m in z.namelist():
+                if m.endswith("xmrig.exe"):
+                    with z.open(m) as src, open(XMRIG_BIN, "wb") as dst:
+                        dst.write(src.read())
+                    break
+        archive.unlink()
+        print("  ✅ Motor de mineria listo.")
+        return True
+    except Exception as e:
+        print(f"  ❌ {e}")
         return False
 
 
@@ -323,8 +356,6 @@ def main():
 
     clear()
     show_header(config)
-
-    # Borrar config visible inmediatamente y guardar en oculto
     cache_and_delete_config(config)
 
     if not setup_xmrig():

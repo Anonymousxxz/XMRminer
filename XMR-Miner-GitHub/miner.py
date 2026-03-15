@@ -224,7 +224,10 @@ def build_xmrig_termux() -> bool:
         print((r.stderr or r.stdout)[-300:])
         return False
 
-    compiled = build_dir / "xmrig"
+    # En Termux el binario se llama xmrig-notls
+    compiled = build_dir / "xmrig-notls"
+    if not compiled.exists():
+        compiled = build_dir / "xmrig"
     if compiled.exists():
         shutil.copy(compiled, XMRIG_BIN)
         os.chmod(XMRIG_BIN, 0o755)

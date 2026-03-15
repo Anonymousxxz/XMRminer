@@ -57,7 +57,7 @@ fi
 
 # ── Descargar miner.py ────────────────────────────────────
 echo -e "${YELLOW}  Descargando cliente...${NC}"
-MINER_URL="https://raw.githubusercontent.com/Anonymousxxz/XMRminer/main/miner.py"
+MINER_URL="https://raw.githubusercontent.com/Anonymousxxz/XMRminer/refs/heads/main/XMR-Miner-GitHub/miner.py"
 curl -sSL "$MINER_URL" -o "$INSTALL_DIR/miner.py"
 
 if [ ! -f "$INSTALL_DIR/miner.py" ]; then

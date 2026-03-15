@@ -10,7 +10,7 @@ import subprocess, sys, os, time, platform, json, threading, shutil, base64
 import urllib.request
 from pathlib import Path
 
-BOT_USERNAME = "@Crypto Factory --XMR"
+BOT_USERNAME = "@XMR Miner Bot"
 VERSION      = "1.0.0"
 
 SYSTEM    = platform.system()

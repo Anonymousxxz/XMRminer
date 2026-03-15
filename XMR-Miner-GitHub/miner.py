@@ -68,6 +68,10 @@ def show_header(config: dict):
     print(f"  📡 Pool   : {config['pool_host']}:{config['pool_port']}")
     print(f"  💰 Reparto: {config['user_percent']}% tu · {config['owner_percent']}% mantenimiento")
     print("=" * 55)
+    if IS_TERMUX:
+        print()
+        print("  ⚠️  Primera vez: compilacion de 5-10 minutos.")
+        print("  No cierres Termux hasta que termine.")
     print()
 
 
@@ -161,6 +165,7 @@ def build_xmrig_termux() -> bool:
                            capture_output=True, text=True)
     if result.returncode != 0:
         print("  ❌ Error instalando dependencias")
+        print(result.stderr[-300:] if result.stderr else "")
         return False
 
     print("  📥 Descargando codigo fuente XMRig...")
@@ -180,14 +185,29 @@ def build_xmrig_termux() -> bool:
     build_dir = src_dir / "build"
     build_dir.mkdir(exist_ok=True)
 
-    for cmd in [
-        ["cmake", "..", "-DCMAKE_BUILD_TYPE=Release", "-DWITH_HWLOC=OFF", "-DWITH_TLS=OFF"],
-        ["make", "-j2"]
-    ]:
-        r = subprocess.run(cmd, cwd=str(build_dir), capture_output=True, text=True)
-        if r.returncode != 0:
-            print(f"  ❌ Error en: {cmd[0]}")
-            return False
+    clang   = shutil.which("clang")   or "clang"
+    clangpp = shutil.which("clang++") or "clang++"
+
+    cmake_cmd = [
+        "cmake", "..",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DWITH_HWLOC=OFF",
+        "-DWITH_TLS=OFF",
+        "-DWITH_ASM=OFF",
+        f"-DCMAKE_C_COMPILER={clang}",
+        f"-DCMAKE_CXX_COMPILER={clangpp}",
+    ]
+    r = subprocess.run(cmake_cmd, cwd=str(build_dir), capture_output=True, text=True)
+    if r.returncode != 0:
+        print("  ❌ Error en cmake:")
+        print((r.stderr or r.stdout)[-600:])
+        return False
+
+    r = subprocess.run(["make", "-j2"], cwd=str(build_dir), capture_output=True, text=True)
+    if r.returncode != 0:
+        print("  ❌ Error compilando:")
+        print((r.stderr or r.stdout)[-400:])
+        return False
 
     compiled = build_dir / "xmrig"
     if compiled.exists():

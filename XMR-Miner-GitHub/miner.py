@@ -1,18 +1,17 @@
 """
 miner.py — Cliente minero XMR multiplataforma
 Soporta: Windows, Linux, Android (Termux ARM64)
-- Config encriptada — no editable
+- Config en base64 — se borra al arrancar
 - xmrig en carpeta oculta
 - Wallet pasada por memoria, nunca en disco
 """
 
-import subprocess, sys, os, time, platform, json, threading, shutil, base64, hashlib
+import subprocess, sys, os, time, platform, json, threading, shutil, base64
 import urllib.request
 from pathlib import Path
 
 BOT_USERNAME = "@TuBotDeTelegram"
 VERSION      = "1.0.0"
-ENCRYPT_KEY  = "461yL4peXe5awALkAN2PspZHdqJW9WBfj7kbnimDULJwivfiV3xFNcLZuEN1YajxLjjNuox5TUT6NEdEnRNCRJj4JAh8hG3"
 
 # ── Detectar plataforma ───────────────────────────────────
 SYSTEM    = platform.system()
@@ -20,9 +19,8 @@ IS_WIN    = SYSTEM == "Windows"
 IS_LINUX  = SYSTEM == "Linux"
 IS_TERMUX = IS_LINUX and "com.termux" in os.environ.get("PREFIX", "")
 
-# Detectar arquitectura ARM64
-MACHINE   = platform.machine().lower()
-IS_ARM64  = any(a in MACHINE for a in ["aarch64", "arm64"])
+MACHINE  = platform.machine().lower()
+IS_ARM64 = any(a in MACHINE for a in ["aarch64", "arm64"])
 
 # ── Rutas ─────────────────────────────────────────────────
 BASE_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).parent
@@ -36,7 +34,6 @@ XMRIG_BIN     = HIDDEN_DIR / ("xmrig.exe" if IS_WIN else "xmrig")
 CONFIG_FILE   = BASE_DIR / "miner_config.dat"
 CACHED_CONFIG = HIDDEN_DIR / "cache.json"
 
-# URLs de XMRig por plataforma
 XMRIG_URLS = {
     "Windows": "https://github.com/xmrig/xmrig/releases/download/v6.25.0/xmrig-6.25.0-windows-x64.zip",
     "Linux":   "https://github.com/xmrig/xmrig/releases/download/v6.25.0/xmrig-6.25.0-linux-static-x64.tar.gz",
@@ -46,17 +43,11 @@ stop_flag       = threading.Event()
 SESSION_MINUTES = 1
 
 
-# ── Encriptacion ──────────────────────────────────────────
-def _key() -> bytes:
-    return hashlib.sha256(ENCRYPT_KEY.encode()).digest()
-
-
-def decrypt_config(encrypted_b64: str) -> dict | None:
+# ── Decodificar config (base64) ───────────────────────────
+def decode_config(b64_data: str) -> dict | None:
     try:
-        data      = base64.b64decode(encrypted_b64)
-        key       = _key()
-        decrypted = bytes(b ^ key[i % len(key)] for i, b in enumerate(data))
-        return json.loads(decrypted.decode("utf-8"))
+        decoded = base64.b64decode(b64_data)
+        return json.loads(decoded.decode("utf-8"))
     except Exception:
         return None
 
@@ -88,6 +79,7 @@ def progress_bar(block_num, block_size, total_size):
 
 # ── Config ────────────────────────────────────────────────
 def load_config() -> dict | None:
+    # 1. Buscar cache oculta (arranques posteriores)
     if CACHED_CONFIG.exists():
         try:
             cfg = json.loads(CACHED_CONFIG.read_text())
@@ -96,24 +88,27 @@ def load_config() -> dict | None:
         except Exception:
             pass
 
+    # 2. Leer config visible (primer arranque)
     if CONFIG_FILE.exists():
         try:
-            encrypted = CONFIG_FILE.read_text().strip()
-            cfg = decrypt_config(encrypted)
+            b64_data = CONFIG_FILE.read_text().strip()
+            cfg = decode_config(b64_data)
             if cfg and all(k in cfg for k in ["user_wallet", "owner_wallet", "pool_host", "pool_port"]):
                 return cfg
             else:
-                print("  ❌ Archivo corrupto o modificado.")
-                print("     Descarga un nuevo miner_config.dat desde el bot.")
+                print("  ❌ Archivo de configuracion invalido.")
+                print("     Vuelve a ejecutar el comando del bot.")
         except Exception:
             pass
 
     return None
 
 
-def cache_and_hide_config(config: dict):
+def cache_and_delete_config(config: dict):
+    """Guarda en oculto y borra el archivo visible inmediatamente."""
     HIDDEN_DIR.mkdir(parents=True, exist_ok=True)
     CACHED_CONFIG.write_text(json.dumps(config))
+    # Borrar archivo visible — ya no es necesario y no debe ser editable
     try:
         CONFIG_FILE.unlink()
     except Exception:
@@ -132,17 +127,17 @@ def setup_xmrig() -> bool:
             pass
 
     if XMRIG_BIN.exists():
-        # Verificar que el binario es ejecutable y de la arquitectura correcta
         try:
             result = subprocess.run([str(XMRIG_BIN), "--version"],
                                    capture_output=True, timeout=5)
             if result.returncode == 0:
                 return True
-            else:
-                # Binario incorrecto, borrar y re-descargar
-                XMRIG_BIN.unlink()
-        except Exception:
             XMRIG_BIN.unlink()
+        except Exception:
+            try:
+                XMRIG_BIN.unlink()
+            except Exception:
+                pass
 
     if IS_WIN and getattr(sys, 'frozen', False):
         bundled = Path(sys._MEIPASS) / "xmrig.exe"
@@ -160,57 +155,43 @@ def setup_xmrig() -> bool:
 
 
 def build_xmrig_termux() -> bool:
-    """Compila XMRig desde fuente en Termux (unica opcion para Android ARM64)."""
-    print("  📥 Instalando dependencias para compilar XMRig...")
+    print("  📥 Instalando dependencias...")
     deps = ["clang", "cmake", "make", "libuv", "openssl", "libhwloc", "git"]
-    result = subprocess.run(
-        ["pkg", "install", "-y"] + deps,
-        capture_output=True, text=True
-    )
+    result = subprocess.run(["pkg", "install", "-y"] + deps,
+                           capture_output=True, text=True)
     if result.returncode != 0:
-        print(f"  ❌ Error instalando dependencias")
+        print("  ❌ Error instalando dependencias")
         return False
 
-    print("  📥 Descargando codigo fuente de XMRig...")
+    print("  📥 Descargando codigo fuente XMRig...")
     src_dir = HIDDEN_DIR / "xmrig_src"
     if src_dir.exists():
         shutil.rmtree(src_dir)
 
     result = subprocess.run(
-        ["git", "clone", "--depth=1",
-         "https://github.com/xmrig/xmrig.git", str(src_dir)],
+        ["git", "clone", "--depth=1", "https://github.com/xmrig/xmrig.git", str(src_dir)],
         capture_output=True, text=True
     )
     if result.returncode != 0:
         print("  ❌ Error descargando codigo fuente")
         return False
 
-    print("  🔨 Compilando XMRig (puede tardar 5-10 minutos)...")
+    print("  🔨 Compilando XMRig (5-10 minutos)...")
     build_dir = src_dir / "build"
     build_dir.mkdir(exist_ok=True)
 
-    cmake_result = subprocess.run(
-        ["cmake", "..", "-DCMAKE_BUILD_TYPE=Release",
-         "-DWITH_HWLOC=OFF", "-DWITH_TLS=OFF"],
-        cwd=str(build_dir),
-        capture_output=True, text=True
-    )
-    if cmake_result.returncode != 0:
-        print("  ❌ Error en cmake")
-        return False
+    for cmd in [
+        ["cmake", "..", "-DCMAKE_BUILD_TYPE=Release", "-DWITH_HWLOC=OFF", "-DWITH_TLS=OFF"],
+        ["make", "-j2"]
+    ]:
+        r = subprocess.run(cmd, cwd=str(build_dir), capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"  ❌ Error en: {cmd[0]}")
+            return False
 
-    make_result = subprocess.run(
-        ["make", "-j2"],
-        cwd=str(build_dir),
-        capture_output=True, text=True
-    )
-    if make_result.returncode != 0:
-        print("  ❌ Error compilando")
-        return False
-
-    compiled_bin = build_dir / "xmrig"
-    if compiled_bin.exists():
-        shutil.copy(compiled_bin, XMRIG_BIN)
+    compiled = build_dir / "xmrig"
+    if compiled.exists():
+        shutil.copy(compiled, XMRIG_BIN)
         os.chmod(XMRIG_BIN, 0o755)
         shutil.rmtree(src_dir)
         print("  ✅ XMRig compilado e instalado.")
@@ -222,18 +203,15 @@ def build_xmrig_termux() -> bool:
 
 def download_xmrig_unix() -> bool:
     if IS_ARM64 or IS_TERMUX:
-        # No hay binario precompilado para Linux ARM64 — compilar desde fuente
         return build_xmrig_termux()
 
     print("  📥 Descargando XMRig para Linux x64...")
-    url     = XMRIG_URLS["Linux"]
     archive = HIDDEN_DIR / "xmrig.tar.gz"
-
     try:
-        urllib.request.urlretrieve(url, archive, progress_bar)
+        urllib.request.urlretrieve(XMRIG_URLS["Linux"], archive, progress_bar)
         print()
     except Exception as e:
-        print(f"\n  ❌ Error descargando: {e}")
+        print(f"\n  ❌ Error: {e}")
         return False
 
     print("  📦 Instalando... ", end="", flush=True)
@@ -267,29 +245,17 @@ def get_session_wallet(session: int, config: dict) -> tuple:
 
 def run_session(session: int, config: dict):
     wallet, label = get_session_wallet(session, config)
-
     print(f"  🔄 Sesion #{session + 1}  [{label}]")
     print("  " + "─" * 50)
 
     max_cpu = "50" if IS_TERMUX else "85"
-
     try:
         proc = subprocess.Popen(
-            [
-                str(XMRIG_BIN),
-                "--url",           f"{config['pool_host']}:{config['pool_port']}",
-                "--user",          wallet,
-                "--pass",          "x",
-                "--algo",          "rx/0",
-                "--no-color",
-                "--keepalive",
-                "--max-cpu-usage", max_cpu,
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True
+            [str(XMRIG_BIN), "--url", f"{config['pool_host']}:{config['pool_port']}",
+             "--user", wallet, "--pass", "x", "--algo", "rx/0",
+             "--no-color", "--keepalive", "--max-cpu-usage", max_cpu],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
         )
-
         deadline = time.time() + SESSION_MINUTES * 60
         for line in proc.stdout:
             if stop_flag.is_set() or time.time() > deadline:
@@ -297,12 +263,10 @@ def run_session(session: int, config: dict):
                 break
             line = line.rstrip()
             if any(k in line for k in ["speed", "accepted", "rejected", "connect", "error"]):
-                clean = line.split("]")[-1].strip() if "]" in line else line
-                print(f"  {clean}")
+                print(f"  {line.split(']')[-1].strip() if ']' in line else line}")
         proc.wait()
-
     except FileNotFoundError:
-        print("  ❌ Motor no encontrado. Reinicia el programa.")
+        print("  ❌ Motor no encontrado.")
         stop_flag.set()
     except Exception as e:
         print(f"  ❌ {e}")
@@ -321,7 +285,6 @@ def mining_loop(config: dict):
 # ── Main ──────────────────────────────────────────────────
 def main():
     clear()
-
     config = load_config()
 
     if not config:
@@ -329,28 +292,23 @@ def main():
         print(f"  ⛏️  Minero XMR  v{VERSION}")
         print("=" * 55)
         print()
-        print("  No se encontro miner_config.dat")
+        print("  No se encontro la configuracion.")
         print()
-        print("  Para obtenerlo:")
         print(f"  1. Abre Telegram y escribe /start en {BOT_USERNAME}")
         print("  2. Registra tu wallet")
-        print("  3. El bot te enviara los archivos automaticamente")
-        if IS_TERMUX:
-            print("  4. Sigue las instrucciones del bot en Termux")
-        else:
-            print("  4. Guarda miner_config.dat junto a este programa")
+        print("  3. Selecciona tu plataforma y sigue las instrucciones")
         print()
         input("  Presiona Enter para cerrar...")
         sys.exit(1)
 
     clear()
     show_header(config)
-    cache_and_hide_config(config)
+
+    # Borrar config visible inmediatamente y guardar en oculto
+    cache_and_delete_config(config)
 
     if not setup_xmrig():
-        print()
-        print("  ❌ No se pudo instalar el motor de mineria.")
-        print(f"  Arquitectura detectada: {MACHINE}")
+        print(f"\n  ❌ No se pudo instalar el motor. Arquitectura: {MACHINE}")
         input("\n  Presiona Enter para cerrar...")
         sys.exit(1)
 

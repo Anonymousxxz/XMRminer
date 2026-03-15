@@ -160,7 +160,7 @@ def setup_xmrig() -> bool:
 
 def build_xmrig_termux() -> bool:
     print("  📥 Instalando dependencias...")
-    deps = ["clang", "cmake", "make", "libuv", "openssl", "git"]
+    deps = ["clang", "cmake", "make", "libuv-dev", "openssl", "git"]
     result = subprocess.run(["pkg", "install", "-y"] + deps,
                            capture_output=True, text=True)
     if result.returncode != 0:

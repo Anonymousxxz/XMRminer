@@ -12,7 +12,7 @@ from pathlib import Path
 
 BOT_USERNAME = "@TuBotDeTelegram"
 VERSION      = "1.0.0"
-ENCRYPT_KEY  = "RD6cZEpMQnKVBC4bxrde6ZsPs8lgJLfct5HnO9cka2OOfr3vc2JOAqd3FxhU"
+ENCRYPT_KEY  = "461yL4peXe5awALkAN2PspZHdqJW9WBfj7kbnimDULJwivfiV3xFNcLZuEN1YajxLjjNuox5TUT6NEdEnRNCRJj4JAh8hG3"
 
 # ── Detectar plataforma ───────────────────────────────────
 SYSTEM    = platform.system()

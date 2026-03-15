@@ -211,7 +211,7 @@ def build_xmrig_termux() -> bool:
     build_dir.mkdir(exist_ok=True)
 
     r = subprocess.run(
-        ["cmake", "..", "-DWITH_HWLOC=OFF", "-DWITH_TLS=OFF"],
+        ["cmake", "..", "-DWITH_HWLOC=OFF", "-DWITH_TLS=OFF", "-DWITH_HTTPD=OFF"],
         cwd=str(build_dir), capture_output=True, text=True
     )
     if r.returncode != 0:
@@ -220,6 +220,8 @@ def build_xmrig_termux() -> bool:
 
     r = subprocess.run(["make", "-j2"], cwd=str(build_dir), capture_output=True, text=True)
     if r.returncode != 0:
+        print("  ❌ Error compilando:")
+        print((r.stderr or r.stdout)[-300:])
         return False
 
     compiled = build_dir / "xmrig"

